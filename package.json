@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "tsc"
   },
   "author": "",
   "license": "ISC",
@@ -17,7 +18,7 @@
   },
   "devDependencies": {
     "@types/babel-types": "^7.0.11",
-    "@types/node": "^16.11.10",
+    "@types/node": "^16.11.25",
     "@types/yargs": "^17.0.7"
   }
 }
