@@ -8,45 +8,41 @@ import { Relationship, Model } from './types';
 // BIG TODOS
 // DONE 1 Parse the model. We might be able to generate better information if we have the model.
 // -----> E.g., we need to figure out if we need to add an association.
-// TODO 1.5 Figure out if there's any useful information in the model.
 // TODO: any is a cop out, figure out a better type.
 // TODO: Find the name of the Sequelize import or require.
 // TODO: Figure out if there are any variables with matching names in scope.
 // TODO: Make a dictionary? Or, ensure that the find finds something.
-// TODO: Did I mess up the the sinkCol and sourceCol????????????????????????
+// TODO: Write the code to file automatically.
 export function transformPair(srcType : string, sinkType : string, src : any, sink : any, exactSink : string, relationships : Relationship[], models : Model[]) : void {
 
+    console.log('Transforming pair: ' + srcType + ' -> ' + sinkType);
     if (srcType === 'findAll' && sinkType === 'count') {
         // Check if this is an N+1 situation.
         const loopPath = confirmNPlusOne(src, sink);
         if (loopPath != null) {
-            console.log('Confirmed N+1');
             const loopElement = getLoopElement(loopPath, src);
-            transformFindAllIntoCountNPlusOne(src, sink, exactSink, loopPath, loopElement, relationships);
+            transformFindAllIntoCountNPlusOne(src, sink, exactSink, loopPath, loopElement, relationships, models);
         } else {
             // We don't do anything if it isn't.
-            // Same goes for the rest ATM.
+            // Same goes for the rest.
         }
     } else if (srcType === 'findAll' && sinkType === 'findOne') {
         const loopPath = confirmNPlusOne(src, sink);
         if (loopPath != null) {
-            console.log('Confirmed N+1');
             const loopElement = getLoopElement(loopPath, src);
-            transformFindAllIntoFindOneNPlusOne(src, sink, exactSink, loopPath, loopElement, relationships);
+            transformFindAllIntoFindOneNPlusOne(src, sink, exactSink, loopPath, loopElement, relationships, models);
         }
     } else if (srcType === 'findAll' && sinkType === 'findAll') {
         const loopPath = confirmNPlusOne(src, sink);
         if (loopPath != null) {
-            console.log('Confirmed N+1');
             const loopElement = getLoopElement(loopPath, src);
-            transformFindAllIntoFindAllNPlusOne(src, sink, exactSink, loopPath, loopElement, relationships);
+            transformFindAllIntoFindAllNPlusOne(src, sink, exactSink, loopPath, loopElement, relationships, models);
         }
     } else if (srcType === 'findAll' && sinkType === 'findByPk') {
         const loopPath = confirmNPlusOne(src, sink);
         if (loopPath != null) {
-            console.log('Confirmed N+1');
             const loopElement = getLoopElement(loopPath, src);
-            transformFindAllIntoFindByPkNPlusOne(src, sink, exactSink, loopPath, loopElement, relationships);
+            transformFindAllIntoFindByPkNPlusOne(src, sink, exactSink, loopPath, loopElement, relationships, models);
         }
     } else {
         // Catch-all case.
@@ -85,51 +81,85 @@ function getLoopElement(loopPath, src) {
     return loopElement;
 }
 
-function findExactSinkPathAndSinkColName(sinkPath, loopVarName, exactSink) {
-    let sinkColName, exactSinkPath;
+function findExactSinkPathAndSinkColName(sinkPath, loopElement, exactSink) {
+    let sinkColName, exactSinkPath, sourceColName;
     babel.traverse(sinkPath.node, {
         MemberExpression(path) {
-            if (path.node.object.name === loopVarName) {
-
-                // The parent of this will be our sinkColName.
-                if (path.parentPath.node.type === 'MemberExpression') {
-                    sinkColName = path.parentPath.node.property.name;
-                } else {
-                    // This is a bad thing. There are going to be more cases.
-                    sinkColName = path.parentPath.node.key.name
-                }
-            }
-
             if (exactSink === generate(path.node).code) {
                 exactSinkPath = path;
                 // Here, we should get the parent propertyDefintion.
-                // ??? TODO
+                // The parent of this will be our sinkColName.
+                const parent = path.parentPath.node;
+                if (parent.type === 'ObjectProperty') {
+                    sinkColName = parent.key.name;
+                }
+            }
+
+            if (generate(path.node.object).code === generate(loopElement).code) {
+                sourceColName = path.node.property.name;
             }
         },
         Identifier(path) {
             if (path.node.name === exactSink) {
                 // We found the sub-expression that we're looking for.
                 exactSinkPath = path;
+
+                const parent = path.parentPath.node;
+                if (parent.type === 'ObjectProperty') {
+                    sinkColName = parent.key.name;
+                }
             }
         }
     }, sinkPath.scope, sinkPath);
 
-    return [sinkColName, exactSinkPath];
+    return [sinkColName, sourceColName, exactSinkPath];
 }
 
-function getLoopVarName(loopElement) {
-    let loopVarName;
-    if (loopElement.type === 'Identifier')
-        loopVarName = loopElement.name;
-    else if (loopElement.type === 'MemberExpression') {
-        loopVarName = loopElement.object.name;
-    } else {
-        console.log('ERROR: Unrecognized loop element type: ' + loopElement.type);
-    }
-    return loopVarName;
-}
+// function findExactSinkPathAndSinkColName(sinkPath, loopVarName, exactSink) {
+//     let sinkColName, exactSinkPath;
+//     babel.traverse(sinkPath.node, {
+//         MemberExpression(path) {
+//             if (path.node.object.name === loopVarName) {
 
-function transformFindAllIntoFindAllNPlusOne(srcPath : any, sinkPath : any, exactSink : string, loopPath : any, loopElement : any, relationships : Relationship[]) {
+//                 // The parent of this will be our sinkColName.
+//                 if (path.parentPath.node.type === 'MemberExpression') {
+//                     sinkColName = path.parentPath.node.property.name;
+//                 } else {
+//                     // This is a bad thing. There are going to be more cases.
+//                     sinkColName = path.parentPath.node.key.name
+//                 }
+//             }
+
+//             if (exactSink === generate(path.node).code) {
+//                 exactSinkPath = path;
+//                 // Here, we should get the parent propertyDefintion.
+//                 // ??? TODO
+//             }
+//         },
+//         Identifier(path) {
+//             if (path.node.name === exactSink) {
+//                 // We found the sub-expression that we're looking for.
+//                 exactSinkPath = path;
+//             }
+//         }
+//     }, sinkPath.scope, sinkPath);
+
+//     return [sinkColName, exactSinkPath];
+// }
+
+// function getLoopVarName(loopElement) {
+//     let loopVarName;
+//     if (loopElement.type === 'Identifier')
+//         loopVarName = loopElement.name;
+//     else if (loopElement.type === 'MemberExpression') {
+//         loopVarName = loopElement.object.name;
+//     } else {
+//         console.log('ERROR: Unrecognized loop element type: ' + loopElement.type);
+//     }
+//     return loopVarName;
+// }
+
+function transformFindAllIntoFindAllNPlusOne(srcPath : any, sinkPath : any, exactSink : string, loopPath : any, loopElement : any, relationships : Relationship[], models : Model[]) {
 
     /* This is the idea:
 
@@ -153,12 +183,11 @@ function transformFindAllIntoFindAllNPlusOne(srcPath : any, sinkPath : any, exac
     const srcVarName = srcVarDecl.node.id.name;
 
     // First, let's get the name of the loop variable.
-    let loopVarName = getLoopVarName(loopElement);
 
     // Now, let's traverse the sinkPath and figure out which parts refer to the loopElement.
     // We need to change those to refer to the source variable.
     const loopVarAccesses = [];
-    let [sinkColName, exactSinkPath] = findExactSinkPathAndSinkColName(sinkPath, loopVarName, exactSink);
+    let [sinkColName, sourceColName, exactSinkPath] = findExactSinkPathAndSinkColName(sinkPath, loopElement, exactSink);
     babel.traverse(sinkPath.node, {
         MemberExpression(path) {
             if (generate(path.node.object).code === generate(loopElement).code) {
@@ -175,11 +204,6 @@ function transformFindAllIntoFindAllNPlusOne(srcPath : any, sinkPath : any, exac
     if (exactSinkPath === undefined) {
         console.log('We didn\'t find the exact sink. This is a problem.');
         return;
-    }
-
-    let sourceColName = '<hope this gets filled in>';
-    if (exactSinkPath.node.type === 'MemberExpression') {
-        sourceColName = exactSinkPath.node.property.name;
     }
 
     loopVarAccesses.forEach(path => {
@@ -214,19 +238,29 @@ function transformFindAllIntoFindAllNPlusOne(srcPath : any, sinkPath : any, exac
             ))]
     )
 
-    console.log('New sink thing:');
-    console.log(generate(newSinkVarDecl).code);
+    // console.log('/////////////////////////////////////////////////');
+    // console.log('New sink thing:');
+    // console.log(generate(newSinkVarDecl).code);
 
-    console.log('New access:');
-    console.log(generate(newAccess).code);
+    // console.log('New access:');
+    // console.log(generate(newAccess).code);
+    // console.log('/////////////////////////////////////////////////');
 
-    console.log('sourceColName: ' + sourceColName);
-    console.log('sinkColName: ' + sinkColName);
-    console.log('/////////////////////////////////////////////////');
+    // Add the new findAll before the loop.
+    loopPath.insertBefore(newSinkVarDecl);
+    // Change the old findAll in the loop to the find.
+    // TODO: There are a few cases here, I think. If the parent is an await expression, we need to delete it.
+    // Check if sinkPath's parent is an await expression.
+    const sinkParent = sinkPath.parentPath;
+    if (sinkParent.node.type === 'AwaitExpression') {
+        sinkParent.replaceWith(newAccess);
+    } else {
+        sinkPath.replaceWith(newAccess);
+        console.log("[transformFindAllIntoFindAllNPlusOne] Please double-check that this is correct.");
+    }
 }
 
-// TODO: The "sourceColName" should be the PK of the model. Fix that.
-function transformFindAllIntoFindByPkNPlusOne(srcPath : any, sinkPath : any, exactSink : string, loopPath : any, loopElement : any, relationships : Relationship[]) {
+function transformFindAllIntoFindByPkNPlusOne(srcPath : any, sinkPath : any, exactSink : string, loopPath : any, loopElement : any, relationships : Relationship[], models : Model[]) {
     // Need this to generate a name for the new assignment.
     const sinkModelName = sinkPath.node.callee.object.name;
 
@@ -239,38 +273,29 @@ function transformFindAllIntoFindByPkNPlusOne(srcPath : any, sinkPath : any, exa
     }
     const srcVarName = srcVarDecl.node.id.name; 
 
-    // Idea for this transformation: instead of a findByPk each time, we can just do a findAll and then do a find inside of the loop.
-    // TODO: Dictionary.
-    // findByPk is a lot simpler than findOne, since we only supply the primary key.
-
-    // First, let's get the name of the loop variable.
-    // If it's an Identifier, just use the name.
-    let loopVarName = getLoopVarName(loopElement);
-
     // Now, let's traverse the sinkPath and figure out which parts refer to the loopVarName.
     // We need to change those to refer to the source variable.
-    let [sinkColName, exactSinkPath] = findExactSinkPathAndSinkColName(sinkPath, loopVarName, exactSink);
+    let [sinkColName, sourceColName, exactSinkPath] = findExactSinkPathAndSinkColName(sinkPath, loopElement, exactSink);
+
+    // Note: In this transformation, there won't be a sinkColName.
+    // It's gonna be the primary key of the sink model. So, get it:
+    let sinkModel = models.find(model => model.name === sinkModelName);
+    sinkColName = sinkModel.primaryKey;
 
     if (exactSinkPath === undefined) {
         console.log('We didn\'t find the exact sink. This is a problem.');
         return;
     }
-
-    let sourceColName = '<hope this gets filled in>';
-    if (exactSinkPath.node.type === 'MemberExpression') {
-        sourceColName = exactSinkPath.node.property.name;
-    }
     
     // Make a new variable declaration for the updated sink.
     const newFindVariableName = `${sinkModelName.toLowerCase()}s`;
 
-    // TODO
     const replacementAPICall = t.callExpression(t.memberExpression(t.identifier(sinkModelName), t.identifier('findAll')), [
         t.objectExpression([
             t.objectProperty(t.identifier('where'), t.objectExpression([
-                t.objectProperty(t.identifier(sourceColName),
+                t.objectProperty(t.identifier(sinkColName),
                 t.callExpression(t.memberExpression(t.identifier(srcVarName), t.identifier('map')), [
-                    t.arrowFunctionExpression([t.identifier('data')], t.memberExpression(t.identifier('data'), t.identifier(sinkColName)))
+                    t.arrowFunctionExpression([t.identifier('data')], t.memberExpression(t.identifier('data'), t.identifier(sourceColName)))
         ]))]))])
     ]);
 
@@ -289,19 +314,32 @@ function transformFindAllIntoFindByPkNPlusOne(srcPath : any, sinkPath : any, exa
             ))]
     )
 
-    console.log('~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~');
-    console.log('New findAll:');
-    console.log(generate(newSinkVarDecl).code);
+    // console.log('~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~');
+    // console.log('New findAll:');
+    // console.log(generate(newSinkVarDecl).code);
 
-    console.log('New access:');
-    console.log(generate(newAccess).code);
-    console.log('~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~');
+    // console.log('New access:');
+    // console.log(generate(newAccess).code);
+    // console.log('~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~');
+
+    // Add the new findAll before the loop.
+    loopPath.insertBefore(newSinkVarDecl);
+    // Change the old findAll in the loop to the find.
+    // TODO: There are a few cases here, I think. If the parent is an await expression, we need to delete it.
+    // Check if sinkPath's parent is an await expression.
+    const sinkParent = sinkPath.parentPath;
+    if (sinkParent.node.type === 'AwaitExpression') {
+        sinkParent.replaceWith(newAccess);
+    } else {
+        sinkPath.replaceWith(newAccess);
+        console.log("[transformFindAllIntoFindByPkNPlusOne] Please double-check that this is correct.");
+    }
 }
 
 /**
  * Transform a flow from findAll into findOne, where the sink is inside of a loop.
  */
-function transformFindAllIntoFindOneNPlusOne(srcPath : any, sinkPath : any, exactSink : string, loopPath : any, loopElement : any, relationships : Relationship[]) : void {
+function transformFindAllIntoFindOneNPlusOne(srcPath : any, sinkPath : any, exactSink : string, loopPath : any, loopElement : any, relationships : Relationship[], models : Model[]) : void {
 
     const sinkModelName = sinkPath.node.callee.object.name;
 
@@ -314,49 +352,22 @@ function transformFindAllIntoFindOneNPlusOne(srcPath : any, sinkPath : any, exac
     }
     const srcVarName = srcVarDecl.node.id.name;
 
-    // Idea for this transformation: instead of a findOne each time, we can just do a findAll and then do a find inside of the loop.
-    // TODO: We might be able to efficiently make a dictionary as well. E.g., by popping and making a dict with the IDs. O(n) instead of
-    // TODO: O(n) each loop iteration.
-    // We'll use the same information that was passed to the findOne in the loop, but change any lookups to the loop variable to look instead
-    // at something related to the source variable. 
-    // E.g., users.forEach(user => { ... user.id ... }) -> Blahblah.findOne({ where: { id: users.map(u => u.id) } })
+    let [sinkColName, sourceColName, exactSinkPath] = findExactSinkPathAndSinkColName(sinkPath, loopElement, exactSink);
 
-    // First, let's get the name of the loop variable.
-    let loopVarName = getLoopVarName(loopElement);
-
-    // Now, let's traverse the sinkPath and figure out which parts refer to the loopVarName.
-    // We need to change those to refer to the source variable.
+    // We shall visit the sinkPath AST and find:
+    // (1) the API call, which we will replace with findAll,
+    // (2) the loop variable accesses, which will be modified when we transform the API call.
     const loopVarAccesses = [];
-    let sinkColName = '';
-    let exactSinkPath;
-    // TODO: We should change this. We don't need to transform the sinkAPI call, 
-    // TODO: we should make our own.
-    // TODO: Actually, we might want to piggy back it. IT will have basically everything in it already.
     let sinkAPICall; // This is the API call that we're going to transform.
     babel.traverse(sinkPath.node, {
         MemberExpression(path) {
-            if (path.node.object.name === loopVarName) {
+            if (generate(path.node.object).code === generate(loopElement).code) {
                 loopVarAccesses.push(path);
-
-                // The parent of this will be our sinkColName.
-                sinkColName = path.parentPath.node.key.name
-            }
-
-            if (exactSink.includes('.')) {
-                const [left, right] = exactSink.split('.');
-                if (path.node.property.name === right && path.node.object.name === left) {
-                    // We found the sub-expression that we're looking for.
-                    exactSinkPath = path;
-                }
             }
         },
         Identifier(path) {
             if (path.node.name === 'findOne') {
                 sinkAPICall = path;
-            }
-            if (path.node.name === exactSink) {
-                // We found the sub-expression that we're looking for.
-                exactSinkPath = path;
             }
         }
     }, sinkPath.scope, sinkPath);
@@ -364,11 +375,6 @@ function transformFindAllIntoFindOneNPlusOne(srcPath : any, sinkPath : any, exac
     if (exactSinkPath === undefined) {
         console.log('We didn\'t find the exact sink. This is a problem.');
         return;
-    }
-
-    let sourceColName = '<hope this gets filled in>';
-    if (exactSinkPath.node.type === 'MemberExpression') {
-        sourceColName = exactSinkPath.node.property.name;
     }
 
     loopVarAccesses.forEach(path => {
@@ -402,18 +408,33 @@ function transformFindAllIntoFindOneNPlusOne(srcPath : any, sinkPath : any, exac
             t.binaryExpression(
                 '===',
                 t.memberExpression(t.identifier('data'), t.identifier(sinkColName)),
-                t.memberExpression(t.identifier(loopVarName), t.identifier(sourceColName))
+                t.memberExpression(loopElement, t.identifier(sourceColName))
             ))]
     )
 
-    console.log('New sink thing:');
-    console.log(generate(newSinkVarDecl).code);
+    // console.log('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
+    // console.log('New sink thing:');
+    // console.log(generate(newSinkVarDecl).code);
 
-    console.log('New access:');
-    console.log(generate(newAccess).code);
+    // console.log('New access:');
+    // console.log(generate(newAccess).code);
+    // console.log('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
+
+    // Add the new findAll before the loop.
+    loopPath.insertBefore(newSinkVarDecl);
+    // Change the old findAll in the loop to the find.
+    // TODO: There are a few cases here, I think. If the parent is an await expression, we need to delete it.
+    // Check if sinkPath's parent is an await expression.
+    const sinkParent = sinkPath.parentPath;
+    if (sinkParent.node.type === 'AwaitExpression') {
+        sinkParent.replaceWith(newAccess);
+    } else {
+        sinkPath.replaceWith(newAccess);
+        console.log("[transformFindAllIntoFindOneNPlusOne] Please double-check that this is correct.");
+    }
 }
 
-function transformFindAllIntoCountNPlusOne(srcPath : any, sinkPath : any, exactSink : string, loopPath : any, loopElement : any, relationships : Relationship[]) : void {
+function transformFindAllIntoCountNPlusOne(srcPath : any, sinkPath : any, exactSink : string, loopPath : any, loopElement : any, relationships : Relationship[], models : Model[]) : void {
     const sinkArgObj = parseArgumentObjOfAPICall(sinkPath);
 
     // TODO: Figure this out programmatically.
@@ -430,8 +451,7 @@ function transformFindAllIntoCountNPlusOne(srcPath : any, sinkPath : any, exactS
 
     // Find the sub-expression that matches exactSink.
     // This traversal may well serve multiple purposes.
-    let loopVarName = getLoopVarName(loopElement);
-    let [sinkColName, exactSinkPath] = findExactSinkPathAndSinkColName(sinkPath, loopVarName, exactSink);
+    let [sinkColName, sourceColName, exactSinkPath] = findExactSinkPathAndSinkColName(sinkPath, loopElement, exactSink);
 
     if (exactSinkPath === null) {
         throw new Error(`Could not find exact sink ${exactSink}; bailing.`);
@@ -464,7 +484,7 @@ function transformFindAllIntoCountNPlusOne(srcPath : any, sinkPath : any, exactS
                     [t.stringLiteral('COUNT'), t.callExpression(
                         t.memberExpression(t.identifier(sequelizeImportName), t.identifier('col')),
                         // NOTE: There's a little plural here. That's because Sequelize will, by default, pluralize the model name.
-                        [t.stringLiteral(`${sinkModelName}s.${sinkColName}`)])]),
+                        [t.stringLiteral(`${sinkModelName}.${sinkColName}`)])]),
                 t.stringLiteral(`${sinkModelName.toLowerCase()}Count`)
             ])
         ]);
@@ -486,37 +506,65 @@ function transformFindAllIntoCountNPlusOne(srcPath : any, sinkPath : any, exactS
             t.variableDeclarator(t.identifier(newCountVariableName), newAPICall)
         ]);
 
+        // TODO: This might want to check for the undefined-ness of find(...).dataValues.
         const newAccessCallToFind = t.callExpression(
             t.memberExpression(t.identifier(newCountVariableName), t.identifier('find')),
             [t.arrowFunctionExpression(
                 [t.identifier('r')], 
                 t.binaryExpression(
                     '===', 
-                    t.memberExpression(t.identifier('r'), t.identifier(sourceColName)), 
+                    t.memberExpression(t.identifier('r'), t.identifier(sinkColName)), 
                     t.memberExpression(loopElement, t.identifier(sourceColName))))]);
         
-        const newAccessRHS = t.memberExpression(
-            t.memberExpression(newAccessCallToFind, t.identifier('dataValues')),
-            t.identifier(`${sinkModelName.toLowerCase()}Count`));
+        // const newAccessRHS = t.memberExpression(
+        //     t.memberExpression(newAccessCallToFind, t.identifier('dataValues')),
+        //     t.identifier(`${sinkModelName.toLowerCase()}Count`));
+
+        // WIP: 
+        const totallyNewVarDecl = t.variableDeclaration('const', [t.variableDeclarator(t.identifier(`${newCountVariableName}_tmp`), newAccessCallToFind)]);
+        const newAccessRHS = t.conditionalExpression(
+            t.binaryExpression('===', 
+                t.identifier(`${newCountVariableName}_tmp`), 
+                t.identifier('undefined')
+            ), t.numericLiteral(0), 
+            t.memberExpression(
+                t.memberExpression( t.identifier(`${newCountVariableName}_tmp`), 
+                    t.identifier('dataValues')), 
+                t.identifier(`${sinkModelName.toLowerCase()}Count`)));
 
         // 3. Place and replace the components.
         // 3.1. Place the new API call assignment.
-        console.log('==========================================================');
-        console.log('Source location:', srcPath.node.loc.start, srcPath.node.loc.end);
-        console.log('New assignment:');
-        console.log(generate(newAssignment).code);
+        // console.log('==========================================================');
+        // console.log('Source location:', srcPath.node.loc.start, srcPath.node.loc.end);
+        // console.log('New assignment:');
+        // console.log(generate(newAssignment).code);
 
-        // 3.2. Replace the RHS of the old access.
-        // 3.2.1. Replace the entire sink with newAccessRHS.
-        console.log('Sink location:', sinkPath.node.loc.start, sinkPath.node.loc.end);
-        console.log('New sink:');
-        sinkPath.replaceWith(newAccessRHS);
-        console.log(generate(sinkPath.node).code);
-        console.log('==========================================================');
+        // // 3.2. Replace the RHS of the old access.
+        // // 3.2.1. Replace the entire sink with newAccessRHS.
+        // console.log('Sink location:', sinkPath.node.loc.start, sinkPath.node.loc.end);
+        // console.log('New sink:');
+        // sinkPath.replaceWith(newAccessRHS);
+        // console.log(generate(sinkPath.node).code);
+        // console.log('==========================================================');
+        
 
-    }
-
-    console.log('TODO: Actually write out the code.');    
+        // Add the new findAll before the loop.
+        loopPath.insertBefore(newAssignment);
+        // In this case, we need to check if the counts are undefined.
+        // That check makes reference to a temporary variable, which is introduced here.
+        sinkPath.getStatementParent().insertBefore(totallyNewVarDecl);
+        
+        // Change the old findAll in the loop to the find.
+        // TODO: There are a few cases here, I think. If the parent is an await expression, we need to delete it.
+        // Check if sinkPath's parent is an await expression.
+        const sinkParent = sinkPath.parentPath;
+        if (sinkParent.node.type === 'AwaitExpression') {
+            sinkParent.replaceWith(newAccessRHS);
+        } else {
+            sinkPath.replaceWith(newAccessRHS);
+            console.log("[transformFindAllIntoCountNPlusOne] Please double-check that this is correct.");
+        }
+    }    
 }
 
 /**

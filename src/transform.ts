@@ -161,7 +161,7 @@ if (argv.mode === 'CodeQL') {
     codeQLFlows.forEach(flow => filesToTransform.add(flow.sourceFile));
 
     // Save the ASTs.
-    const asts = [];
+    const asts = {};
 
     // Initialize transformNodePairs with objects containing sources and sinks.
     const transformNodePairs : Array<{source : any, sourceName: string, sink : any, sinkName: string, exactSink: string}> = codeQLFlows.map(() => {
@@ -174,7 +174,7 @@ if (argv.mode === 'CodeQL') {
         const fileContents = readFileSync(file, 'utf8');
 
         const ast = babel.parseSync(fileContents);
-        asts.push(ast);
+        asts[file] = ast;
 
         babel.traverse(ast, {
             CallExpression(path) {
@@ -211,9 +211,21 @@ if (argv.mode === 'CodeQL') {
     });
     
     // Once the nodes are updates, apply the transformations.
-    asts.forEach(ast => {
-        fsPromises.writeFile('tmp.js', generate(ast).code);
-    });
+    for (const file in asts) {
+        // TODO: We can probably do a better job of this, but let's add an import to
+        // TODO: Sequelize, i.e., const Sequelize = require('sequelize');
+        // TODO: Also, we want to make sure that there isn't already a Sequelize import.
+        // TODO: Check if static imports or not.
+        // const sequelizeImport = t.importDeclaration([], t.stringLiteral('sequelize'));
+        const sequelizeRequire = t.variableDeclaration('const', [
+            t.variableDeclarator(t.identifier('Sequelize'), 
+            t.callExpression(t.identifier('require'), [t.stringLiteral('sequelize')]))]);
+        // Add to the ast.
+        asts[file].program.body.unshift(sequelizeRequire);
+
+        fsPromises.writeFile(file, generate(asts[file]).code);
+    }
+
 } else if (argv.mode === 'Augur') {
     const exampleFlow = JSON.parse(sampleString);
     // TODO: add IDs to each flow
@@ -316,7 +328,7 @@ function parseSequelizeModelFile(pathToModel) {
                 //     defaultValue: Sequelize.UUIDV4,
                 // },
                 const properties = [];
-                let primaryKey;
+                let primaryKey = 'id';
                 modelDefinitionProperties.forEach(property => {
                     // The name will be something like 'id', but it's the value that we need to check.
                     // The value will be an object expression.
@@ -335,7 +347,7 @@ function parseSequelizeModelFile(pathToModel) {
                     properties.push(property.key.name);
                 });
 
-                models.push(new Model(modelName, primaryKey, properties, []));
+                models.push(new Model(modelName, properties, primaryKey, []));
             }
         }
     });
