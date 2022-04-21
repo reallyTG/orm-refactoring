@@ -61,8 +61,12 @@ export class CodeQLFlow {
     sinkLineEnd : number
 
     exactSink : string;
+    exactSinkStartLine : number;
+    exactSinkEndLine : number;
+    exactSinkStartCol : number;
+    exactSinkEndCol : number;
 
-    constructor(sourceType, sourceFile, sourceLineStart, sourceLineEnd, sinkType, sinkFile, sinkLineStart, sinkLineEnd, exactSink) {
+    constructor(sourceType, sourceFile, sourceLineStart, sourceLineEnd, sinkType, sinkFile, sinkLineStart, sinkLineEnd, exactSink, exactSinkStartLine, exactSinkEndLine, exactSinkStartCol, exactSinkEndCol) {
         this.UID = CodeQLFlow.seen++;
         this.sourceType = sourceType;
         this.sourceFile = sourceFile;
@@ -73,6 +77,10 @@ export class CodeQLFlow {
         this.sinkLineStart = sinkLineStart;
         this.sinkLineEnd = sinkLineEnd;
         this.exactSink = exactSink;
+        this.exactSinkStartLine = exactSinkStartLine;
+        this.exactSinkEndLine = exactSinkEndLine;
+        this.exactSinkStartCol = exactSinkStartCol;
+        this.exactSinkEndCol = exactSinkEndCol;
     }
 }
 

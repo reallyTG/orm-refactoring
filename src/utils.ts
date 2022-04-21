@@ -54,16 +54,16 @@ export function locMatchesCodeQLSink(babelLOC, codeQLFlow) : boolean {
  * @param babelLOC the babel LOC
  * @param flows an array of flows
  */
- export function getMatchingFlowForLOCCodeQL(babelLOC, flows : CodeQLFlow[]) : {isSource: boolean, flow: any}[] | false {
+ export function getMatchingFlowForLOCCodeQL(babelLOC, flows : CodeQLFlow[], file : string) : {isSource: boolean, flow: any}[] | false {
     const matchingFlows = [];
     for (let i = 0; i < flows.length; i++) {
         const thisFlow = flows[i];
 
-        if (locMatchesCodeQLSource(babelLOC, thisFlow)) {
+        if (file == thisFlow.sourceFile && locMatchesCodeQLSource(babelLOC, thisFlow)) {
             matchingFlows.push({isSource: true, flow: thisFlow});
         }
         
-        if (locMatchesCodeQLSink(babelLOC, thisFlow)) {
+        if (file == thisFlow.sinkFile && locMatchesCodeQLSink(babelLOC, thisFlow)) {
             matchingFlows.push({isSource: false, flow: thisFlow});
         }
     }
@@ -81,7 +81,11 @@ export function parseCodeQLFlowFile(pathToFile) : CodeQLFlow[] {
         Sink_File = 5,
         Sink_Start_Ln = 6,
         Sink_End_Ln = 7,
-        ExactSink = 8
+        ExactSink = 8,
+        ExactSinkStartLine = 9,
+        ExactSinkEndLine = 10,
+        ExactSinkStartCol = 11,
+        ExactSinkEndCol = 12
     }
 
     const fileContents = readFileSync(pathToFile, 'utf-8');
@@ -102,7 +106,11 @@ export function parseCodeQLFlowFile(pathToFile) : CodeQLFlow[] {
                                         splitLine[Column.Sink_File],
                                         Number.parseInt(splitLine[Column.Sink_Start_Ln]),
                                         Number.parseInt(splitLine[Column.Sink_End_Ln]),
-                                        splitLine[Column.ExactSink]);
+                                        splitLine[Column.ExactSink],
+                                        Number.parseInt(splitLine[Column.ExactSinkStartLine]),
+                                        Number.parseInt(splitLine[Column.ExactSinkEndLine]),
+                                        Number.parseInt(splitLine[Column.ExactSinkStartCol]),
+                                        Number.parseInt(splitLine[Column.ExactSinkEndCol]));
 
         flows.push(thisFlow);
     }

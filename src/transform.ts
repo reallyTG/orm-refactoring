@@ -61,6 +61,8 @@ const sampleString2 = `{
     }
 }`
 
+// TODO: Some projects define the associations within the models themselves.
+
 /**
  * This CLI takes in:
  *
@@ -82,6 +84,10 @@ const modelDirectory = argv.models;
 const modelFiles = readdirSync(modelDirectory);
 const models = [];
 
+// TODO: Add to this in the model parsing.
+const validRelationships = ['hasMany', 'belongsTo', 'hasOne', 'belongsToMany'];
+const relationships : Relationship[] = [];
+
 modelFiles.forEach(modelFile => {
     const modelsInFile = parseSequelizeModelFile(`${modelDirectory}/${modelFile}`);
     models.push(...modelsInFile);
@@ -89,64 +95,62 @@ modelFiles.forEach(modelFile => {
 
 // Parse sequelize file.
 const sequelizeFile = argv.sequelizeFile;
-const sequelizeFileContents = readFileSync(sequelizeFile, 'utf8');
+if (sequelizeFile !== undefined) {
+    const sequelizeFileContents = readFileSync(sequelizeFile, 'utf8');
 
-// Have Babel look at the file contents.
-const seuqelizeFileAST = babel.parseSync(sequelizeFileContents);
+    // Have Babel look at the file contents.
+    const seuqelizeFileAST = babel.parseSync(sequelizeFileContents);
 
-const validRelationships = ['hasMany', 'belongsTo', 'hasOne', 'belongsToMany'];
-
-const relationships : Relationship[] = [];
-
-babel.traverse(seuqelizeFileAST, {
-    // We're mainly looking at CallExpressions:
-    // e.g., Video.hasMany(Comment), User.belongsTo(Video, { through: 'View' })
-    CallExpression(path) {
-        // Important things to look out for:
-        // 1. the relationships at all (e.g., Video.hasMany(Comment))
-        // 2. the presence of a through table (e.g., User.belongsTo(Video, { through: 'View' }))
-        const asCallExpression = path.node;
-        const callee = asCallExpression.callee;
-        // Probably the callee is a MemberExpression.
-        if (callee.type === 'MemberExpression') {
-            // The object will be the model, the property will be the relationship.
-            const model = callee.object;
-            const relationship = callee.property;
-            if (validRelationships.includes(relationship.name)) {
-                // Ok, now we parse the arguments.
-                const args = asCallExpression.arguments;
-                // The first argument is the model that we're relating to.
-                const relatedModel = args[0];
-                if (args.length > 1) {
-                    // The second argument has more information.
-                    const extraInfoObject = args[1];
-                    // It's probably an object, right?
-                    if (extraInfoObject.type == "ObjectExpression") {
-                        // Go through all the fields:
-                        let isThrough = null;
-                        // Default foreign key name:
-                        let foreignKeyName = `${model.name.toLowerCase()}Id`;
-                        extraInfoObject.properties.forEach(property => {
-                            switch (property.key.name) {
-                                case 'through':
-                                    // Probably it'll be an identifier.
-                                    isThrough = property.value.name;
-                                    break;
-                                case 'foreignKey':
-                                    // It'll be a string literal.
-                                    foreignKeyName = property.value.value;
-                                    break;
-                            }
-                        });
-                        // Now we have all the information we need.
-                        const relationship = new Relationship(model.name, relatedModel.name, foreignKeyName, isThrough);
-                        relationships.push(relationship);
+    babel.traverse(seuqelizeFileAST, {
+        // We're mainly looking at CallExpressions:
+        // e.g., Video.hasMany(Comment), User.belongsTo(Video, { through: 'View' })
+        CallExpression(path) {
+            // Important things to look out for:
+            // 1. the relationships at all (e.g., Video.hasMany(Comment))
+            // 2. the presence of a through table (e.g., User.belongsTo(Video, { through: 'View' }))
+            const asCallExpression = path.node;
+            const callee = asCallExpression.callee;
+            // Probably the callee is a MemberExpression.
+            if (callee.type === 'MemberExpression') {
+                // The object will be the model, the property will be the relationship.
+                const model = callee.object;
+                const relationship = callee.property;
+                if (validRelationships.includes(relationship.name)) {
+                    // Ok, now we parse the arguments.
+                    const args = asCallExpression.arguments;
+                    // The first argument is the model that we're relating to.
+                    const relatedModel = args[0];
+                    if (args.length > 1) {
+                        // The second argument has more information.
+                        const extraInfoObject = args[1];
+                        // It's probably an object, right?
+                        if (extraInfoObject.type == "ObjectExpression") {
+                            // Go through all the fields:
+                            let isThrough = null;
+                            // Default foreign key name:
+                            let foreignKeyName = `${model.name.toLowerCase()}Id`;
+                            extraInfoObject.properties.forEach(property => {
+                                switch (property.key.name) {
+                                    case 'through':
+                                        // Probably it'll be an identifier.
+                                        isThrough = property.value.name;
+                                        break;
+                                    case 'foreignKey':
+                                        // It'll be a string literal.
+                                        foreignKeyName = property.value.value;
+                                        break;
+                                }
+                            });
+                            // Now we have all the information we need.
+                            const relationship = new Relationship(model.name, relatedModel.name, foreignKeyName, isThrough);
+                            relationships.push(relationship);
+                        }
                     }
                 }
             }
         }
-    }
-});
+    });
+}
 
 // There are two modes: CodeQL and Augur.
 // Automated transformations are limited to:
@@ -181,7 +185,7 @@ if (argv.mode === 'CodeQL') {
                 const thisLOC = path.node.loc;
 
                 let matchingFlows;
-                if (matchingFlows = getMatchingFlowForLOCCodeQL(thisLOC, codeQLFlows)) {
+                if (matchingFlows = getMatchingFlowForLOCCodeQL(thisLOC, codeQLFlows, file)) {
                     matchingFlows.forEach((matchingFlow) => {
                         if (matchingFlow.isSource) {
                             transformNodePairs[matchingFlow.flow.UID].source = path;
@@ -197,6 +201,10 @@ if (argv.mode === 'CodeQL') {
         });
     });
 
+    transformNodePairs.forEach((transformNodePair) => {
+        console.log(transformNodePair);
+    });
+
     // Step 2: Transform the nodes.
     transformNodePairs.forEach(pair => {
 
@@ -207,7 +215,7 @@ if (argv.mode === 'CodeQL') {
         const sinkAPICall = pair.sinkName;
         const exactSink = pair.exactSink;
     
-        transformPair(srcAPICall, sinkAPICall, src, sink, exactSink, relationships, models);
+        // transformPair(srcAPICall, sinkAPICall, src, sink, exactSink, relationships, models);
     });
     
     // Once the nodes are updates, apply the transformations.
