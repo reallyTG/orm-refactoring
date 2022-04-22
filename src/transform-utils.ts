@@ -2,6 +2,8 @@ import * as t from '@babel/types';
 import { program } from 'babel-types';
 import path = require('path/posix');
 
+const supportedSinks = ['findAll', 'count', 'findOne', 'findByPk'];
+
 // Check if path corresponds to a loop.
 function isALoopPath(path) {
     return path.isForInStatement() || path.isForOfStatement() || path.isForStatement() || path.isWhileStatement() || path.isDoWhileStatement();
@@ -95,6 +97,17 @@ export function createPropertyAccessForNewQuery(newName, exactSinkPath) {
     return null;
 }
 
+export function createNewPropertyValueForNewQuery(newName, exactSinkPath, sourceVarName) {
+    // Get the new prop access.
+    const newPropAccess = createPropertyAccessForNewQuery(newName, exactSinkPath);
+
+    // Put it in a map.
+    const newPropValue = t.callExpression(t.memberExpression(t.identifier(sourceVarName), t.identifier('map')), 
+        [t.arrowFunctionExpression([t.identifier(newName)], newPropAccess)]);
+
+    return newPropValue;
+}
+
 // Heuristics for trying to get the model name if the model is aliased.
 // Currently: 1. Will check the imports to see if anything is imported.
 export function tryToGetModelName(modelAliasName, sinkPath) {
@@ -133,17 +146,39 @@ export function tryToGetModelName(modelAliasName, sinkPath) {
     return modelName;
 }
 
-// export function getColumnProperty(exactSinkPath) {
-//     const exactSinkNode = exactSinkPath.node;
+export function getModelNameIfInInclude(exactSinkPath) {
+    // Are we in an include?
+    let modelName = undefined;
+    const includePath = exactSinkPath.findParent(p => p.isObjectProperty() && p.node.key.name === 'include');
+    if (includePath) {
+        // Ok. The model name will be in the value of the model property of the object referred to by this property.
+        const modelNode = includePath.node.value.properties.find(p => p.key.name === 'model');
 
-//     // This should always be the case.
-//     if (exactSinkNode.type === 'MemberExpression') {
-//         console.log('~~~~~~~~~~~~~~~~~~~~~~');
-//         if (exactSinkNode.object.type === 'MemberExpression' &&
-//             exactSinkNode.object.property === 'dataValues') {
-//             // We want to keep this.
-            
-//         }
-//     }
-//     // const sourceColName = exactSinkPath.node.property.name;
-// }
+        // The model name is in there.
+        // Note: there are gon be heuristics here. For example, if the model is aliased, we need to look at the imports.
+        // Also, the model might be at the end of some chain of property accesses, e.g., `SequelizeImport.database.models.User`.
+        if (modelNode.value.type === 'Identifier') {
+            modelName = modelNode.value.name;
+        } else if (modelNode.value.type === 'MemberExpression') {
+            // Grab the property.
+            modelName = modelNode.value.property.name;
+        }
+    } else {
+        // This exact sink path is not in an include, so the name will the object on the API call expression.
+        const apiCallPath = exactSinkPath.findParent(p => p.isCallExpression() && p.node.callee.type === 'MemberExpression' && supportedSinks.indexOf(p.node.callee.property.name) > -1);
+        if (apiCallPath.node.callee.object.type === 'Identifier') {
+            modelName = apiCallPath.node.callee.object.name;
+        } else if (apiCallPath.node.callee.object.type === 'MemberExpression') {
+            modelName = apiCallPath.node.callee.object.property.name;
+        }
+    }
+    // TODO: Check for alias here. Or, check for alias in caller?
+    return modelName;
+}
+
+// Idea: & together all of the boolean sub expressions.
+export function makeBigBooleanCheck(booleanSubExpressions) {
+    return booleanSubExpressions.reduce((accumulator, current) =>
+        t.binaryExpression('&', accumulator, current)
+    );
+}

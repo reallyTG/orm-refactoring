@@ -3,7 +3,7 @@ import * as t from '@babel/types';
 import * as parser from '@babel/parser';
 import yargs from 'yargs';
 import { readFileSync, readdirSync, promises as fsPromises } from 'fs';
-import { getMatchingFlowForLOC, parseCodeQLFlowFile, getMatchingFlowForLOCCodeQL } from './utils';
+import { getMatchingFlowForLOC, parseCodeQLFlowFile, getMatchingFlowForLOCCodeQL, locMatchesExactSink } from './utils';
 import { Flow, Relationship, Model } from './types';
 import { transformPair } from './transformations';
 import generate from '@babel/generator';
@@ -168,8 +168,8 @@ if (argv.mode === 'CodeQL') {
     const asts = {};
 
     // Initialize transformNodePairs with objects containing sources and sinks.
-    const transformNodePairs : Array<{source : any, sourceName: string, sink : any, sinkName: string, exactSink: string}> = codeQLFlows.map(() => {
-        return { source: {}, sourceName: '', sink: {}, sinkName: '', exactSink: '' };
+    const transformNodePairs : Array<{source : any, sourceName: string, sink : any, sinkName: string, exactSinks: any, dealtWith : boolean}> = codeQLFlows.map(() => {
+        return { source: {}, sourceName: '', sink: {}, sinkName: '', exactSinks: [], dealtWith: false };
     });
 
     // Read each file, and determine nodes involved in the transformation.
@@ -193,7 +193,24 @@ if (argv.mode === 'CodeQL') {
                         } else { /* matchingFlow.isSource === false, so it's a sink */
                             transformNodePairs[matchingFlow.flow.UID].sink = path;
                             transformNodePairs[matchingFlow.flow.UID].sinkName = matchingFlow.flow.sinkType;
-                            transformNodePairs[matchingFlow.flow.UID].exactSink = matchingFlow.flow.exactSink;
+                            // transformNodePairs[matchingFlow.flow.UID].exactSink = matchingFlow.flow.exactSink;
+                            // Get the actual babel thing matching the exact sink.
+                            // console.log(matchingFlow);
+                            let exactSinkBabelPath = null;
+                            babel.traverse(path.node, {
+                                Expression(subPath) {
+                                    const exactSinkFlowObj = {
+                                        start: [ matchingFlow.flow.exactSinkStartLine, matchingFlow.flow.exactSinkStartCol], 
+                                        end: [ matchingFlow.flow.exactSinkEndLine, matchingFlow.flow.exactSinkEndCol]
+                                    };
+                                    // console.log(subPath.node.loc);
+                                    // console.log(exactSinkFlowObj);
+                                    if (locMatchesExactSink(subPath.node.loc, exactSinkFlowObj)) {
+                                        exactSinkBabelPath = subPath;
+                                    }
+                                }
+                            }, path.scope, path);
+                            transformNodePairs[matchingFlow.flow.UID].exactSinks = [exactSinkBabelPath];
                         }
                     });
                 }
@@ -201,23 +218,43 @@ if (argv.mode === 'CodeQL') {
         });
     });
 
+    const uniqueTransformNodePairs = [];
+    // We need to handle the case where two API calls have multiple flows.
+    // Maintain a list of unique transform pairs.
+    // For any pair that hasn't been dealt with, that matches a unique transform pair, add its exact sink to 
+    // the list that the unique transform pair has.
+    // This way, each unique transform pair will have a list of sinks that are in its scope.
     transformNodePairs.forEach((transformNodePair) => {
-        console.log(transformNodePair);
+        if (transformNodePair.dealtWith)
+            return;
+
+        const match = uniqueTransformNodePairs.find(otherPair => 
+            transformNodePair.source.node === otherPair.source.node &&
+            transformNodePair.sink.node === otherPair.sink.node
+        )
+
+        if (match === undefined) {
+            // Didn't find it; add it.
+            uniqueTransformNodePairs.push(transformNodePair);
+            transformNodePair.dealtWith = true;
+        } else {
+            match.exactSinks.push(...transformNodePair.exactSinks);
+        }
     });
 
     // Step 2: Transform the nodes.
-    transformNodePairs.forEach(pair => {
+    uniqueTransformNodePairs.forEach(pair => {
 
         const src /* : t.CallExpression */ = pair.source; 
         const sink /* : t.CallExpression */ = pair.sink;
     
         const srcAPICall = pair.sourceName;
         const sinkAPICall = pair.sinkName;
-        const exactSink = pair.exactSink;
+        const exactSinks = pair.exactSinks;
     
-        // transformPair(srcAPICall, sinkAPICall, src, sink, exactSink, relationships, models);
+        transformPair(srcAPICall, sinkAPICall, src, sink, exactSinks, relationships, models);
     });
-    
+
     // Once the nodes are updates, apply the transformations.
     for (const file in asts) {
         // TODO: We can probably do a better job of this, but let's add an import to
@@ -228,10 +265,11 @@ if (argv.mode === 'CodeQL') {
         const sequelizeRequire = t.variableDeclaration('const', [
             t.variableDeclarator(t.identifier('Sequelize'), 
             t.callExpression(t.identifier('require'), [t.stringLiteral('sequelize')]))]);
+            
         // Add to the ast.
         asts[file].program.body.unshift(sequelizeRequire);
 
-        fsPromises.writeFile(file, generate(asts[file]).code);
+        fsPromises.writeFile(file, generate(asts[file]).code); 
     }
 
 } else if (argv.mode === 'Augur') {

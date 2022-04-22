@@ -17,6 +17,15 @@ export function locMatches(babelLOC, flowPos) : boolean {
     (babelLOC.end.column + 1) === flowPos.end[1]
 }
 
+export function locMatchesExactSink(babelLOC, flowPos) : boolean {
+    if (babelLOC === undefined) return false;
+
+    return babelLOC.start.line === flowPos.start[0] &&
+    (babelLOC.start.column + 1) === flowPos.start[1] &&
+    babelLOC.end.line === flowPos.end[0] &&
+    (babelLOC.end.column) === flowPos.end[1]
+}
+
 /**
  * Takes a babelLOC and all flows, and returns the flow corresponding to the babelLOC, as well as if it is a source or sink.
  * @param babelLOC the babel LOC
